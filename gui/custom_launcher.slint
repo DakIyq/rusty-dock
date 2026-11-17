@@ -1,0 +1,141 @@
+import { Button, HorizontalBox, LineEdit, Palette, VerticalBox } from "std-widgets.slint";
+
+// Defines a custom launcher: a name and an icon picked from disk. Opened by the app menu's
+// "Custom", or by a custom launcher's "Edit" to change one; custom_launcher.rs fills and
+// reads it. Properties carry a launcher- prefix, which keeps them clear of Window built-ins
+// like `title` and `icon`.
+export component CustomLauncherWindow inherits Window {
+    title: root.editing ? "Edit Custom Launcher" : "Add Custom Launcher";
+    icon: @image-url("../assets/icon.png");
+    min-width: 420px;
+
+    // Changing an existing launcher rather than adding one.
+    in property <bool> editing;
+    in-out property <string> launcher-name;
+    // Path of an image (png/jpg/webp) or a program whose icon is used; set by custom_launcher.rs
+    // from the file dialog, not shown.
+    in-out property <string> launcher-icon-path;
+    // The icon as the dock would show it; empty when none is picked or it can't be read.
+    in property <image> launcher-icon-preview;
+    // Why adding failed (e.g. no name), or empty.
+    in property <string> error;
+
+    // Opens a file dialog; custom_launcher.rs sets launcher-icon-path and the preview.
+    callback browse-icon();
+    callback add();
+    callback cancel();
+
+    VerticalBox {
+        if root.error != "": HorizontalBox {
+            padding: 0;
+            vertical-stretch: 0;
+            
+            Rectangle {
+                horizontal-stretch: 1;
+                vertical-stretch: 0;
+                border-width: 2px;
+                background: #f0d0d3;
+                border-color: #e5b9bd;
+
+                VerticalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    padding-top: 8px;
+                    padding-bottom: 8px;
+
+                    Text {
+                        text: root.error;
+                        color: #e04040;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+
+        HorizontalBox {
+            padding: 0;
+            vertical-stretch: 0;
+
+            // The icon preview doubles as the Browse button: clicking it opens the file dialog.
+            Rectangle {
+                width: 64px;
+                height: 64px;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: icon-area.has-hover ? Palette.accent-background : #80808080;
+                background: icon-area.pressed ? #80808040 : icon-area.has-hover ? #80808020 : transparent;
+
+                Image {
+                    width: 64px;
+                    height: 64px;
+                    source: root.launcher-icon-preview;
+                }
+
+                // No icon yet: hint that the tile is clickable.
+                if root.launcher-icon-preview.width == 0: Text {
+                    text: "+";
+                    font-size: 24px;
+                    color: Palette.foreground;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                icon-area := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.browse-icon();
+                    }
+                }
+            }
+            
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 8px;
+                alignment: center;
+
+                Text {
+                    text: "Name";
+                    color: Palette.foreground;
+                    min-width: 60px;
+                    horizontal-alignment: left;
+                    vertical-alignment: center;
+                }
+
+                LineEdit {
+                    horizontal-stretch: 1;
+                    text <=> root.launcher-name;
+                    placeholder-text: "";
+                }
+            }
+        }
+        
+        // Takes the window's extra height, so the buttons stay at the bottom.
+        Rectangle {
+            vertical-stretch: 1;
+        }
+
+        HorizontalBox {
+            padding: 0;
+            vertical-stretch: 0;
+
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+
+            Button {
+                text: "Cancel";
+                clicked => {
+                    root.cancel();
+                }
+            }
+
+            Button {
+                text: "Save";
+                primary: true;
+                clicked => {
+                    root.add();
+                }
+            }
+        }
+    }
+}

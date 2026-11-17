@@ -1,0 +1,184 @@
+import { Button, HorizontalBox, LineEdit, Palette, VerticalBox } from "std-widgets.slint";
+
+// Adds an application (any program, shortcut or file) to a custom launcher's popup: a name, the
+// file it opens and an optional icon. Opened by right-clicking a custom launcher's popup ("Add
+// application"), or by an application's "Edit" to change it; custom_application.rs fills and
+// reads it. Properties carry an app- prefix, which keeps them clear of Window built-ins like
+// `title` and `icon`.
+export component CustomApplicationWindow inherits Window {
+    title: root.editing ? "Edit Application in " + root.launcher-name : "Add Application to " + root.launcher-name;
+    icon: @image-url("../assets/icon.png");
+    min-width: 460px;
+
+    // The custom launcher it is added to, for the title.
+    in property <string> launcher-name;
+    // Changing an existing application rather than adding one.
+    in property <bool> editing;
+    in-out property <string> app-name;
+    // The program, shortcut or file the popup's tile opens.
+    in-out property <string> app-path;
+    // An image (png/jpg/webp) or a program whose icon is used; set by custom_application.rs from
+    // the file dialog, not shown. Empty: the application's own icon.
+    in-out property <string> app-icon-path;
+    // The icon as the popup would show it; empty when there is none.
+    in property <image> app-icon-preview;
+    // Why adding failed (e.g. no application), or empty.
+    in property <string> error;
+
+    // Open a file dialog; custom_application.rs sets the path and the preview.
+    callback browse-app();
+    callback browse-icon();
+    // The path was typed in, so the preview may change.
+    callback app-path-edited();
+    callback add();
+    callback cancel();
+
+    VerticalBox {
+        if root.error != "": HorizontalBox {
+            padding: 0;
+            vertical-stretch: 0;
+
+            Rectangle {
+                horizontal-stretch: 1;
+                vertical-stretch: 0;
+                border-width: 2px;
+                background: #f0d0d3;
+                border-color: #e5b9bd;
+
+                VerticalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    padding-top: 8px;
+                    padding-bottom: 8px;
+
+                    Text {
+                        text: root.error;
+                        color: #e04040;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+
+        HorizontalBox {
+            padding: 0;
+            vertical-stretch: 0;
+
+            // The icon preview doubles as the icon's Browse button.
+            Rectangle {
+                width: 64px;
+                height: 64px;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: icon-area.has-hover ? Palette.accent-background : #80808080;
+                background: icon-area.pressed ? #80808040 : icon-area.has-hover ? #80808020 : transparent;
+
+                Image {
+                    width: 64px;
+                    height: 64px;
+                    source: root.app-icon-preview;
+                }
+
+                // No icon yet: hint that the tile is clickable.
+                if root.app-icon-preview.width == 0: Text {
+                    text: "+";
+                    font-size: 24px;
+                    color: Palette.foreground;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                icon-area := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.browse-icon();
+                    }
+                }
+            }
+
+
+            VerticalBox {
+                padding: 0;
+                
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 8px;
+                    alignment: center;
+
+                    Text {
+                        text: "Name";
+                        color: Palette.foreground;
+                        horizontal-alignment: left;
+                    }
+
+                    LineEdit {
+                        horizontal-stretch: 1;
+                        text <=> root.app-name;
+                    }
+                }
+                
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 8px;
+                    alignment: center;
+
+                    Text {
+                        text: "Application";
+                        color: Palette.foreground;
+                        horizontal-alignment: left;
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+
+                        LineEdit {
+                            horizontal-stretch: 1;
+                            text <=> root.app-path;
+                            placeholder-text: "Program, shortcut or file";
+                            edited(text) => {
+                                root.app-path-edited();
+                            }
+                        }
+
+                        Button {
+                            text: "Browse";
+                            clicked => {
+                                root.browse-app();
+                            }
+                        }
+                    }
+                }
+            }
+
+        }
+
+        // Takes the window's extra height, so the buttons stay at the bottom.
+        Rectangle {
+            vertical-stretch: 1;
+        }
+
+        HorizontalBox {
+            padding: 0;
+            vertical-stretch: 0;
+
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+
+            Button {
+                text: "Cancel";
+                clicked => {
+                    root.cancel();
+                }
+            }
+
+            Button {
+                text: "Save";
+                primary: true;
+                clicked => {
+                    root.add();
+                }
+            }
+        }
+    }
+}

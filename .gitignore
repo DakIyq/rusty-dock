@@ -1,0 +1,23 @@
+/target
+/RustyDock
+/RustyDock.exe
+
+# AI assistants
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+.mcp.json
+AGENTS.md
+GEMINI.md
+.gemini/
+.cursor/
+.cursorrules
+.cursorignore
+.windsurf/
+.windsurfrules
+.github/copilot-instructions.md
+.aider*
+.continue/
+.codex/
+.clinerules
+.roo/

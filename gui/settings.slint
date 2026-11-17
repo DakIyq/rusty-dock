@@ -1,0 +1,298 @@
+import { Button, CheckBox, ComboBox, HorizontalBox, LineEdit, Palette, Slider, SpinBox, TabWidget, VerticalBox } from "std-widgets.slint";
+
+// A setting's name on the left, its control(s) on the right.
+component Row inherits HorizontalLayout {
+    in property <string> label;
+    spacing: 8px;
+
+    Text {
+        text: root.label;
+        color: Palette.foreground;
+        min-width: 130px;
+        vertical-alignment: center;
+    }
+
+    @children
+}
+
+// A short explanation under a setting.
+component Hint inherits Text {
+    color: Palette.foreground.transparentize(0.4);
+    font-size: 11px;
+    wrap: word-wrap;
+}
+
+// A "#RRGGBB" field with a swatch showing the color at its opacity.
+component ColorRow {
+    in property <string> label;
+    in-out property <string> value;
+    in property <color> preview;
+
+    Row {
+        label: root.label;
+
+        LineEdit {
+            text <=> root.value;
+            placeholder-text: "#RRGGBB";
+        }
+
+        Rectangle {
+            width: 28px;
+            height: 28px;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: #80808080;
+            background: root.preview;
+        }
+    }
+}
+
+// An opacity slider from 0 to 1, with its value in percent.
+component OpacityRow {
+    in property <string> label;
+    in-out property <float> value;
+
+    Row {
+        label: root.label;
+
+        Slider {
+            minimum: 0;
+            maximum: 1;
+            value <=> root.value;
+        }
+
+        Text {
+            text: round(root.value * 100) + " %";
+            color: Palette.foreground;
+            min-width: 40px;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// Edits config.toml. main.rs fills it from the file when opened; saving writes the file and
+// applies it to the running dock. Properties carry a dock-
+// or popup- prefix, which also keeps them clear of Window built-ins like `always-on-top`.
+export component SettingsWindow inherits Window {
+    title: "Rusty Dock Settings";
+    icon: @image-url("../assets/icon.png");
+    min-width: 480px;
+
+    in-out property <bool> autostart;
+
+    in-out property <int> dock-icon-size: 48;
+    // Index into the "Icon type" choices, in `config::IconShape::ALL`'s order.
+    in-out property <int> dock-icon-shape: 2;
+    in-out property <bool> dock-vertical;
+    in-out property <string> dock-background: "#1e1e24";
+    in-out property <float> dock-opacity: 0.9;
+    in-out property <bool> dock-always-on-top;
+    in-out property <bool> dock-movable: true;
+    in-out property <bool> dock-sortable: true;
+
+    in-out property <int> popup-columns: 6;
+    in-out property <int> popup-landscape-columns: 3;
+    in-out property <int> popup-rows: 3;
+    // Like `dock-icon-shape`; custom launchers' application icons only.
+    in-out property <int> popup-icon-shape: 2;
+    in-out property <string> popup-background: "#1e1e24";
+    in-out property <float> popup-opacity: 1.0;
+    in-out property <bool> popup-close-on-focus-loss: true;
+
+    // Why saving failed (e.g. an invalid color), or empty.
+    in property <string> error;
+
+    // The swatch color for a "#RRGGBB" text and an opacity; transparent when invalid.
+    pure callback preview-color(string, float) -> color;
+    callback save();
+    callback cancel();
+    // Opens config.toml in a text editor, for settings not shown here (launchers, hidden games).
+    callback open-file();
+
+    VerticalBox {
+        if root.error != "": HorizontalBox {
+            padding: 0;
+            vertical-stretch: 0;
+            
+            Rectangle {
+                horizontal-stretch: 1;
+                vertical-stretch: 0;
+                border-width: 2px;
+                background: #f0d0d3;
+                border-color: #e5b9bd;
+
+                VerticalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    padding-top: 8px;
+                    padding-bottom: 8px;
+
+                    Text {
+                        text: root.error;
+                        color: #e04040;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+
+        TabWidget {
+            Tab {
+                title: "Dock";
+                VerticalBox {
+                    alignment: start;
+
+                    CheckBox {
+                        text: "Start Rusty Dock when I sign in";
+                        checked <=> root.autostart;
+                    }
+
+                    Row {
+                        label: "Icon size (px)";
+                        SpinBox {
+                            minimum: 16;
+                            maximum: 256;
+                            value <=> root.dock-icon-size;
+                        }
+                    }
+
+                    Row {
+                        label: "Icon type";
+                        ComboBox {
+                            model: ["Circle", "Curve", "Flat"];
+                            current-index <=> root.dock-icon-shape;
+                        }
+                    }
+
+                    CheckBox {
+                        text: "Vertical (icons in a column)";
+                        checked <=> root.dock-vertical;
+                    }
+
+                    ColorRow {
+                        label: "Background";
+                        value <=> root.dock-background;
+                        preview: root.preview-color(root.dock-background, root.dock-opacity);
+                    }
+
+                    OpacityRow {
+                        label: "Opacity";
+                        value <=> root.dock-opacity;
+                    }
+
+                    CheckBox {
+                        text: "Always on top";
+                        checked <=> root.dock-always-on-top;
+                    }
+
+                    Hint {
+                        text: "Otherwise the Win key brings the dock above maximised windows while Start or Search is open.";
+                    }
+
+                    CheckBox {
+                        text: "Let the dock be movable";
+                        checked <=> root.dock-movable;
+                    }
+
+                    CheckBox {
+                        text: "Let the launcher be draggable";
+                        checked <=> root.dock-sortable;
+                    }
+                }
+            }
+
+            Tab {
+                title: "Popup";
+                VerticalBox {
+                    alignment: start;
+
+                    Row {
+                        label: "Portrait covers per row";
+                        SpinBox {
+                            minimum: 1;
+                            maximum: 20;
+                            value <=> root.popup-columns;
+                        }
+                    }
+
+                    Row {
+                        label: "Landscape covers per row";
+                        SpinBox {
+                            minimum: 1;
+                            maximum: 20;
+                            value <=> root.popup-landscape-columns;
+                        }
+                    }
+
+                    Row {
+                        label: "Rows before scrolling";
+                        SpinBox {
+                            minimum: 1;
+                            maximum: 20;
+                            value <=> root.popup-rows;
+                        }
+                    }
+
+                    Row {
+                        label: "Icon type";
+                        ComboBox {
+                            model: ["Circle", "Curve", "Flat"];
+                            current-index <=> root.popup-icon-shape;
+                        }
+                    }
+
+                    Hint {
+                        text: "For applications in custom launchers. Game covers keep their shape.";
+                    }
+
+                    ColorRow {
+                        label: "Background";
+                        value <=> root.popup-background;
+                        preview: root.preview-color(root.popup-background, root.popup-opacity);
+                    }
+
+                    OpacityRow {
+                        label: "Opacity";
+                        value <=> root.popup-opacity;
+                    }
+
+                    CheckBox {
+                        text: "Close when another app takes the foreground";
+                        checked <=> root.popup-close-on-focus-loss;
+                    }
+                }
+            }
+        }
+
+        HorizontalBox {
+            padding: 0;
+
+            Button {
+                text: "Config file";
+                clicked => {
+                    root.open-file();
+                }
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+
+            Button {
+                text: "Cancel";
+                clicked => {
+                    root.cancel();
+                }
+            }
+
+            Button {
+                text: "Save";
+                primary: true;
+                clicked => {
+                    root.save();
+                }
+            }
+        }
+    }
+}

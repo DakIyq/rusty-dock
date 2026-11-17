@@ -1,0 +1,433 @@
+export { SettingsWindow } from "settings.slint";
+export { CustomLauncherWindow } from "custom_launcher.slint";
+export { CustomApplicationWindow } from "custom_application.slint";
+
+// One icon in the dock or in the games popup: a launcher or a game.
+export struct DockItem {
+    id: string,
+    title: string,
+    icon: image,
+    has-icon: bool,
+    // Shown instead of the icon when there is no artwork.
+    label: string,
+}
+
+component DockIcon inherits Rectangle {
+    in property <DockItem> item;
+    // Outlined while its games popup is open.
+    in property <bool> active;
+    // Dragging it along the dock fires `dragged` instead of `clicked`.
+    in property <bool> reorderable;
+    // The dock is a column, so tiles are dragged up and down rather than sideways.
+    in property <bool> vertical;
+    callback clicked;
+    callback right-clicked;
+    callback hovered(bool);
+    // Fired while dragging with the distance from the press point along the dock, and on release.
+    callback dragged(length);
+    callback dropped();
+    // Reset on the next press rather than on release, so it still swallows the release's
+    // click whichever of the two Slint delivers first.
+    property <bool> dragging;
+    // The tile follows the cursor, so its own offset (`root.x` or `root.y`) is added back to get
+    // the distance from where it was pressed.
+    property <length> drag-distance: root.vertical ? root.y + touch.mouse-y - touch.pressed-y
+        : root.x + touch.mouse-x - touch.pressed-x;
+
+    // The dock and the games popup set the real size.
+    width: 64px;
+    height: 64px;
+    border-radius: 12px;
+    clip: true;
+    background: #ffffff18;
+
+    if root.item.has-icon: Image {
+        width: 100%;
+        height: 100%;
+        source: root.item.icon;
+        image-fit: cover;
+    }
+
+    if !root.item.has-icon: Text {
+        text: root.item.label;
+        font-size: 20px;
+        color: white;
+    }
+
+    // Hover highlight and outline drawn over the artwork.
+    Rectangle {
+        border-radius: root.border-radius;
+        background: touch.has-hover ? #ffffff30 : transparent;
+        border-width: root.active ? 2px : 0px;
+        border-color: #ffffffd0;
+    }
+
+    touch := TouchArea {
+        clicked => {
+            if (!root.dragging) {
+                root.clicked();
+            }
+        }
+        moved => {
+            if (root.reorderable && self.pressed && (root.dragging || abs(root.drag-distance) > 4px)) {
+                root.dragging = true;
+                root.dragged(root.drag-distance);
+            }
+        }
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                root.dragging = false;
+            }
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up && root.dragging) {
+                root.dropped();
+            }
+            if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                root.right-clicked();
+            }
+        }
+        changed has-hover => {
+            root.hovered(self.has-hover);
+        }
+    }
+}
+
+// The tile behind each launcher icon (`[dock] icon_shape`): a circle, a rounded square, or none.
+export enum IconShape { circle, curve, flat }
+
+// First layer: one icon per installed launcher.
+export component Dock inherits Window {
+    title: "Rusty Dock";
+    // Shown by Linux/X11 window lists; on Windows both are tool windows, and Explorer and the
+    // tray use the icon embedded by build.rs.
+    icon: @image-url("../assets/icon.png");
+    no-frame: true;
+    background: transparent;
+
+    in property <[DockItem]> launchers;
+    // Index of the launcher whose games popup is open, or -1.
+    in property <int> active-index: -1;
+    // Launcher tile size, set from config.toml; main.rs scales icons to it.
+    in property <length> icon-size: 48px;
+    // Tile shape, set from config.toml; main.rs cuts icons to it (`icon_radius`).
+    in property <IconShape> icon-shape: IconShape.flat;
+    // Panel behind the icons, set from config.toml.
+    in property <color> panel-color: #1e1e24e6;
+    // Whether launcher tiles can be dragged into another order, set from config.toml.
+    in property <bool> sortable: true;
+    // Tiles in a column instead of a row, set from config.toml.
+    in property <bool> vertical;
+
+    // Fired while dragging; dx/dy is how far the cursor moved from the press point.
+    callback move-window(length, length);
+    // Fired with the launcher's index and its icon's center along the dock in the window
+    // (x, or y when vertical).
+    callback launcher-clicked(int, length);
+    // Right-click on the dock's background (not a launcher tile, whose TouchArea takes the
+    // click): main.rs opens the app menu as a native menu, which isn't clipped to this small
+    // window as a Slint popup would be.
+    callback show-menu();
+    // Right-click on the launcher at this dock position: main.rs opens its own native menu.
+    callback launcher-menu(int);
+    // A launcher was dragged from one position to another; main.rs reorders the model.
+    callback launcher-moved(int, int);
+
+    property <length> gap: 8px;
+    property <length> pad: 10px;
+    // Distance between neighbouring launcher tiles.
+    property <length> step: root.icon-size + root.gap;
+    // Length of the row (or column) of tiles.
+    property <length> run: root.launchers.length * root.step - root.gap;
+    // The launcher being dragged to reorder it, or -1, how far it has been dragged along the
+    // dock, and the position it would take if dropped now.
+    property <int> drag-index: -1;
+    property <length> drag-distance;
+    property <int> drag-target: root.drag-index < 0 ? -1
+        : max(0, min(root.launchers.length - 1, round(root.drag-index + root.drag-distance / root.step)));
+
+    // Sized to its tiles, so the window grows or shrinks with them and with the orientation.
+    width: root.launchers.length == 0 ? empty.preferred-width + 2 * root.pad
+        : (root.vertical ? root.icon-size : root.run) + 2 * root.pad;
+    height: root.launchers.length == 0 ? empty.preferred-height + 2 * root.pad
+        : (root.vertical ? root.run : root.icon-size) + 2 * root.pad;
+
+    // The dragged tile follows the cursor (kept within the dock); the tiles between its old
+    // and new position move over by one to make room.
+    pure function offset(i: int) -> length {
+        if (root.drag-index < 0) {
+            return 0px;
+        }
+        if (i == root.drag-index) {
+            return max(-root.drag-index * root.step, min((root.launchers.length - 1 - root.drag-index) * root.step, root.drag-distance));
+        }
+        if (i > root.drag-index && i <= root.drag-target) {
+            return -root.step;
+        }
+        if (i < root.drag-index && i >= root.drag-target) {
+            return root.step;
+        }
+        return 0px;
+    }
+
+    // Dragging anywhere outside an icon moves the dock.
+    TouchArea {
+        moved => {
+            if (self.pressed) {
+                root.move-window(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+            }
+        }
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                root.show-menu();
+            }
+        }
+    }
+
+    Rectangle {
+        background: root.panel-color;
+        border-radius: 16px;
+    }
+
+    empty := Text {
+        x: root.pad;
+        y: root.pad;
+        width: self.preferred-width;
+        height: self.preferred-height;
+        visible: root.launchers.length == 0;
+        text: "No game launchers found";
+        color: #ffffffb0;
+    }
+
+    // A fixed slot per launcher, in a row or a column, so the slots keep still while the
+    // tiles inside shift.
+    for launcher[i] in root.launchers: Rectangle {
+        x: root.pad + (root.vertical ? 0px : i * root.step);
+        y: root.pad + (root.vertical ? i * root.step : 0px);
+        width: root.icon-size;
+        height: root.icon-size;
+        // The dragged tile is drawn over the ones it passes.
+        z: i == root.drag-index ? 1 : 0;
+
+        DockIcon {
+            x: root.vertical ? 0px : root.offset(i);
+            y: root.vertical ? root.offset(i) : 0px;
+            // Flat: launcher icons keep their own transparent shape, with no tile behind them.
+            // The radius also shapes the hover highlight and the open launcher's outline, so they
+            // match the icon type: round, rounded or square.
+            background: root.icon-shape == IconShape.flat ? transparent : #ffffff20;
+            border-radius: root.icon-shape == IconShape.circle ? root.icon-size / 2
+                : root.icon-shape == IconShape.curve ? root.icon-size / 4 : 0px;
+            width: root.icon-size;
+            height: root.icon-size;
+            item: launcher;
+            active: i == root.active-index;
+            vertical: root.vertical;
+            reorderable: root.sortable && root.launchers.length > 1;
+            clicked => {
+                root.launcher-clicked(i, root.vertical ? parent.y + self.height / 2 : parent.x + self.width / 2);
+            }
+            right-clicked => {
+                root.launcher-menu(i);
+            }
+            dragged(distance) => {
+                root.drag-index = i;
+                root.drag-distance = distance;
+            }
+            dropped => {
+                if (root.drag-index == i && root.drag-target != i) {
+                    root.launcher-moved(i, root.drag-target);
+                }
+                root.drag-index = -1;
+                root.drag-distance = 0px;
+            }
+        }
+    }
+}
+
+// Where the games popup sits relative to the dock: above or below a horizontal dock, left or
+// right of a vertical one. Its tail is on the opposite edge, pointing at the launcher.
+export enum PopupSide { above, below, left, right }
+
+// Second layer: a speech bubble beside a launcher, listing its games.
+export component GamesPopup inherits Window {
+    in property <string> launcher-name;
+    in property <[DockItem]> games;
+    // Shown when `games` is empty; custom launchers explain how to add items (right-click).
+    in property <string> empty-text: "No installed games";
+    // The launcher's covers are 16:9 (EA's splash art) rather than 2:3.
+    in property <bool> landscape;
+    // Square icons with no tile behind them, like the dock's launchers, instead of covers
+    // (custom launchers' applications). Overrides `landscape`.
+    in property <bool> icons;
+    // Tile shape of those icons, set from config.toml; main.rs cuts them to it (`icon_radius`).
+    // Covers keep their rounded corners.
+    in property <IconShape> icon-shape: IconShape.flat;
+    // Tiles per row for portrait and landscape covers, and rows shown before the list
+    // scrolls; set from config.toml.
+    in property <int> portrait-columns: 6;
+    in property <int> landscape-columns: 3;
+    in property <int> max-rows: 3;
+
+    // Fired with the DockItem id of the clicked game.
+    callback launch(string);
+    callback dismiss();
+    // Right-click anywhere in the bubble: main.rs opens a native menu (a custom launcher's
+    // "Add application"), which isn't clipped to this window as a Slint popup would be.
+    callback show-menu();
+    // Right-click on a game tile, with its DockItem id (a custom application's "Remove").
+    callback item-menu(string);
+
+    // Game tiles match the cover shape: 2:3 portrait like Steam's, or 16:9 landscape; icons
+    // are square. main.rs shrinks covers to these sizes (PORTRAIT_TILE, LANDSCAPE_TILE,
+    // ICON_TILE); keep in sync.
+    property <length> tile-width: root.icons ? 56px : root.landscape ? 160px : 72px;
+    property <length> tile-height: root.icons ? 56px : root.landscape ? 90px : 108px;
+    property <length> gap: 8px;
+    property <length> pad: 12px;
+    property <length> header: 24px;
+    property <length> arrow: 10px;
+    property <int> columns: max(1, min(root.games.length, root.landscape && !root.icons ? root.landscape-columns : root.portrait-columns));
+    property <int> rows: ceil(root.games.length / root.columns);
+    // Taller lists scroll.
+    property <int> visible-rows: max(1, min(root.rows, root.max-rows));
+    property <string> hovered-title;
+    // Bubble and tail, set from config.toml.
+    in property <color> bubble-color: #1e1e24;
+    // Center of the tail along its edge (x, or y when the tail is on the left or right). Set by
+    // main.rs when the bubble is shifted to stay on screen, so the tail still points at the
+    // launcher; negative means centered.
+    in property <length> tail-pos: -1px;
+    // Set by main.rs, toward the larger part of the dock's monitor.
+    in property <PopupSide> side: PopupSide.above;
+    // The tail is on the left or right edge.
+    property <bool> sideways: root.side == PopupSide.left || root.side == PopupSide.right;
+    property <length> bubble-width: max(220px, root.columns * root.tile-width + (root.columns - 1) * root.gap + 2 * root.pad);
+    property <length> bubble-height: root.pad + root.header + root.visible-rows * root.tile-height + (root.visible-rows - 1) * root.gap + root.pad;
+
+    // Read by Rust to place the popup beside the dock before it is shown.
+    out property <length> panel-width: root.bubble-width + (root.sideways ? root.arrow : 0px);
+    out property <length> panel-height: root.bubble-height + (root.sideways ? 0px : root.arrow);
+
+    title: "Rusty Dock";
+    icon: @image-url("../assets/icon.png");
+    no-frame: true;
+    background: transparent;
+    width: root.panel-width;
+    height: root.panel-height;
+    forward-focus: keys;
+
+    changed games => {
+        root.hovered-title = "";
+    }
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.dismiss();
+                return accept;
+            }
+            reject
+        }
+    }
+
+    Rectangle {
+        x: root.side == PopupSide.right ? root.arrow : 0px;
+        y: root.side == PopupSide.below ? root.arrow : 0px;
+        width: root.bubble-width;
+        height: root.bubble-height;
+        background: root.bubble-color;
+        border-radius: 12px;
+
+        // Below everything else: right-clicks on the header, padding or empty-text.
+        TouchArea {
+            pointer-event(event) => {
+                if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                    root.show-menu();
+                }
+            }
+        }
+
+        Text {
+            x: root.pad;
+            y: root.pad;
+            width: parent.width - 2 * root.pad;
+            height: root.header;
+            text: root.hovered-title != "" ? root.hovered-title : root.launcher-name + " · " + root.games.length + " games";
+            color: white;
+            font-size: 13px;
+            overflow: elide;
+            vertical-alignment: top;
+        }
+
+        if root.games.length == 0: Text {
+            y: root.pad + root.header;
+            text: root.empty-text;
+            color: #ffffffb0;
+        }
+
+        Flickable {
+            x: root.pad;
+            y: root.pad + root.header;
+            width: parent.width - 2 * root.pad;
+            height: root.visible-rows * root.tile-height + (root.visible-rows - 1) * root.gap;
+            content-height: root.rows * root.tile-height + max(root.rows - 1, 0) * root.gap;
+
+            // The gaps between tiles: the Flickable takes those clicks from the bubble's TouchArea.
+            TouchArea {
+                width: parent.width;
+                height: max(parent.height, root.rows * root.tile-height + max(root.rows - 1, 0) * root.gap);
+                pointer-event(event) => {
+                    if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                        root.show-menu();
+                    }
+                }
+            }
+
+            for game[i] in root.games: DockIcon {
+                x: mod(i, root.columns) * (root.tile-width + root.gap);
+                y: floor(i / root.columns) * (root.tile-height + root.gap);
+                width: root.tile-width;
+                height: root.tile-height;
+                // The software renderer doesn't clip to it, so main.rs rounds covers and icons
+                // itself (GAME_TILE_RADIUS, `icon_radius`); keep in sync.
+                border-radius: !root.icons ? 8px
+                    : root.icon-shape == IconShape.circle ? self.width / 2
+                    : root.icon-shape == IconShape.curve ? self.width / 4 : 0px;
+                // Flat icons have their own transparent shape, like the dock's launchers, with no
+                // tile; initials keep one so they don't float.
+                background: !root.icons ? #ffffff18
+                    : root.icon-shape != IconShape.flat ? #ffffff20
+                    : game.has-icon ? transparent : #ffffff18;
+                item: game;
+                clicked => {
+                    root.launch(game.id);
+                }
+                right-clicked => {
+                    root.item-menu(game.id);
+                }
+                hovered(on) => {
+                    root.hovered-title = on ? game.title : "";
+                }
+            }
+        }
+    }
+
+    // Tail pointing at the launcher icon, on the edge facing the dock, kept clear of the rounded
+    // corners.
+    Path {
+        x: root.sideways ? (root.side == PopupSide.right ? 0px : parent.width - root.arrow)
+            : root.tail-pos < 0px ? (parent.width - 2 * root.arrow) / 2
+            : max(12px, min(root.tail-pos - root.arrow, parent.width - 12px - 2 * root.arrow));
+        y: !root.sideways ? (root.side == PopupSide.below ? 0px : parent.height - root.arrow)
+            : root.tail-pos < 0px ? (parent.height - 2 * root.arrow) / 2
+            : max(12px, min(root.tail-pos - root.arrow, parent.height - 12px - 2 * root.arrow));
+        width: root.sideways ? root.arrow : 2 * root.arrow;
+        height: root.sideways ? 2 * root.arrow : root.arrow;
+        viewbox-width: root.sideways ? 10 : 20;
+        viewbox-height: root.sideways ? 20 : 10;
+        commands: root.side == PopupSide.below ? "M 0 10 L 20 10 L 10 0 Z"
+            : root.side == PopupSide.left ? "M 0 0 L 10 10 L 0 20 Z"
+            : root.side == PopupSide.right ? "M 10 0 L 0 10 L 10 20 Z"
+            : "M 0 0 L 20 0 L 10 10 Z";
+        fill: root.bubble-color;
+    }
+}
